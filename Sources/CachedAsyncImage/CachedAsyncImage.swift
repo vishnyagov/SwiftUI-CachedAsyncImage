@@ -247,7 +247,6 @@ private func remoteImage(from url: URL?, httpHeaders: [String: String]?, session
     for (key, value) in httpHeaders ?? [:] {
         request.setValue(value, forHTTPHeaderField: key)
     }
-    request.setValue(token, forHTTPHeaderField: "Cookie")
     let (data, _) = try await session.data(for: request)
     return image(from: data)
 }
