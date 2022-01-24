@@ -77,6 +77,8 @@ public struct CachedAsyncImage<Content>: View where Content: View {
     
     private let content: (AsyncImagePhase) -> Content
     
+    private let httpHeaders: [String: Any]?
+    
     public var body: some View {
         content(phase)
             .task(id: url, load)
@@ -104,8 +106,8 @@ public struct CachedAsyncImage<Content>: View where Content: View {
     ///     different value when loading images designed for higher resolution
     ///     displays. For example, set a value of `2` for an image that you
     ///     would name with the `@2x` suffix if stored in a file on disk.
-    public init(url: URL?, urlCache: URLCache = .shared,  scale: CGFloat = 1) where Content == Image {
-        self.init(url: url, urlCache: urlCache, scale: scale) { phase in
+    public init(url: URL?, httpHeaders: [String: Any]? = nil, urlCache: URLCache = .shared,  scale: CGFloat = 1) where Content == Image {
+        self.init(url: url, httpHeaders: httpHeaders, urlCache: urlCache, scale: scale) { phase in
 #if os(macOS)
             phase.image ?? Image(nsImage: .init())
 #else
@@ -145,8 +147,8 @@ public struct CachedAsyncImage<Content>: View where Content: View {
     ///     modify it as needed before returning it.
     ///   - placeholder: A closure that returns the view to show until the
     ///     load operation completes successfully.
-    public init<I, P>(url: URL?, urlCache: URLCache = .shared,  scale: CGFloat = 1, @ViewBuilder content: @escaping (Image) -> I, @ViewBuilder placeholder: @escaping () -> P) where Content == _ConditionalContent<I, P>, I : View, P : View {
-        self.init(url: url, urlCache: urlCache, scale: scale) { phase in
+    public init<I, P>(url: URL?, httpHeaders: [String: Any]? = nil, urlCache: URLCache = .shared,  scale: CGFloat = 1, @ViewBuilder content: @escaping (Image) -> I, @ViewBuilder placeholder: @escaping () -> P) where Content == _ConditionalContent<I, P>, I : View, P : View {
+        self.init(url: url, httpHeaders: httpHeaders, urlCache: urlCache, scale: scale) { phase in
             if let image = phase.image {
                 content(image)
             } else {
@@ -190,11 +192,12 @@ public struct CachedAsyncImage<Content>: View where Content: View {
     ///   - transaction: The transaction to use when the phase changes.
     ///   - content: A closure that takes the load phase as an input, and
     ///     returns the view to display for the specified phase.
-    public init(url: URL?, urlCache: URLCache = .shared, scale: CGFloat = 1, transaction: Transaction = Transaction(), @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
+    public init(url: URL?, httpHeaders: [String: Any]? = nil, urlCache: URLCache = .shared, scale: CGFloat = 1, transaction: Transaction = Transaction(), @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
         let configuration = URLSessionConfiguration.default
         configuration.urlCache = urlCache
         configuration.requestCachePolicy = .returnCacheDataElseLoad
         self.url = url
+        self.httpHeaders = httpHeaders
         self.urlSession =  URLSession(configuration: configuration)
         self.scale = scale
         self.transaction = transaction
@@ -211,7 +214,7 @@ public struct CachedAsyncImage<Content>: View where Content: View {
     @Sendable
     private func load() async {
         do {
-            if let image = try await remoteImage(from: url, session: urlSession) {
+            if let image = try await remoteImage(from: url, httpHeaders: httpHeaders, session: urlSession) {
                 withAnimation(transaction.animation) {
                     phase = .success(image)
                 }
@@ -238,17 +241,24 @@ private extension AsyncImage {
 // MARK: - Helpers
 
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
-private func remoteImage(from url: URL?, session: URLSession) async throws -> Image? {
+private func remoteImage(from url: URL?, httpHeaders: [String: Any]?, session: URLSession) async throws -> Image? {
     guard let url = url else { return nil }
-    let request = URLRequest(url: url)
+    var request = URLRequest(url: url)
+    for (key, value) in httpHeaders ?? [:] {
+        request.setValue(value, forHTTPHeaderField: key)
+    }
+    request.setValue(token, forHTTPHeaderField: "Cookie")
     let (data, _) = try await session.data(for: request)
     return image(from: data)
 }
 
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
-private func cachedImage(from url: URL?, cache: URLCache) -> Image? {
+private func cachedImage(from url: URL?, httpHeaders: [String: Any]?, cache: URLCache) -> Image? {
     guard let url = url else { return nil }
-    let request = URLRequest(url: url)
+    var request = URLRequest(url: url)
+    for (key, value) in httpHeaders ?? [:] {
+        request.setValue(value, forHTTPHeaderField: key)
+    }
     guard let cachedResponse = cache.cachedResponse(for: request) else { return nil }
     return image(from: cachedResponse.data)
 }
